@@ -1,0 +1,438 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CI+CD for serverless APIs
+Parameters:
+  RepositoryName:
+    Description: The name of the CodeCommit repo
+    Default: my-repo
+    Type: String
+    AllowedPattern: '[\x20-\x7E]*'
+    ConstraintDescription: Can contain only ASCII characters.
+  DevelopmentBranchName:
+    Description: The name of the development branch
+    Default: master
+    Type: String
+    AllowedPattern: '[\x20-\x7E]*'
+    ConstraintDescription: Can contain only ASCII characters.
+  ApplicationName:
+    Description: The name applied to all pipeline assets
+    Default: my-app
+    Type: String
+    AllowedPattern: '[\x20-\x7E]*'
+    ConstraintDescription: Can contain only ASCII characters.
+Resources:
+  CodePipelineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: codepipeline-service
+          PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - s3:PutObject
+                Resource:
+                  - arn:aws:s3:::codepipeline*
+                  - arn:aws:s3:::elasticbeanstalk*
+                Effect: Allow
+              - Action:
+                  - codecommit:CancelUploadArchive
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:UploadArchive
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - elasticbeanstalk:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - autoscaling:*
+                  - cloudwatch:*
+                  - s3:*
+                  - sns:*
+                  - cloudformation:*
+                  - rds:*
+                  - sqs:*
+                  - ecs:*
+                  - iam:PassRole
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - lambda:InvokeFunction
+                  - lambda:ListFunctions
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - opsworks:CreateDeployment
+                  - opsworks:DescribeApps
+                  - opsworks:DescribeCommands
+                  - opsworks:DescribeDeployments
+                  - opsworks:DescribeInstances
+                  - opsworks:DescribeStacks
+                  - opsworks:UpdateApp
+                  - opsworks:UpdateStack
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:UpdateStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:SetStackPolicy
+                  - cloudformation:ValidateTemplate
+                  - iam:PassRole
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: '*'
+                Effect: Allow
+  ServerlessRootRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root-service
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: '*'
+                Action: '*'
+  CodeBuildRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: codebuild-service
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Resource: '*'
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Effect: Allow
+                Resource: !Join
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref CodePipelineBucket
+                    - '*'
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+              - Effect: Allow
+                Resource: !Join 
+                  - ''
+                  - - 'arn:aws:codecommit:'
+                    - !Ref 'AWS::Region'
+                    - ':'
+                    - !Ref 'AWS::AccountId'
+                    - ':'
+                    - !Ref RepositoryName
+                Action:
+                  - codecommit:GitPull
+              - Effect: Allow
+                Resource: !Join
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref CodeBuildBucket
+                    - '/*'
+                Action:
+                  - s3:PutObject
+  CodePipelineBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join 
+        - ''
+        - - 'codepipeline-'
+          - !Ref ApplicationName
+          - '-'
+          - !Ref 'AWS::Region'
+          - '-'
+          - !Ref 'AWS::AccountId'
+  CodeBuildBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join 
+        - ''
+        - - 'codebuild-'
+          - !Ref ApplicationName
+          - '-'
+          - !Ref 'AWS::Region'
+          - '-'
+          - !Ref 'AWS::AccountId'
+  LintAndTest:
+    Type: 'AWS::CodeBuild::Project'
+    Properties: 
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: 'CodeBuild project for unit testing and linting'
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/nodejs:6.3.1 #http://docs.aws.amazon.com/codebuild/latest/userguide/build-env-ref.html#build-env-ref-available
+        Type: LINUX_CONTAINER
+      Name: !Join 
+        - ''
+        - - 'test-lint-'
+          - !Ref ApplicationName
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        BuildSpec: buildspec-test-lint.yml        
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 5
+  DeployDev:
+    Type: 'AWS::CodeBuild::Project'
+    Properties: 
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: 'CodeBuild project for deploying to the development environment'
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/nodejs:6.3.1 #http://docs.aws.amazon.com/codebuild/latest/userguide/build-env-ref.html#build-env-ref-available
+        Type: LINUX_CONTAINER
+      Name: !Join 
+        - ''
+        - - 'deploy-dev-'
+          - !Ref ApplicationName
+      ServiceRole: !Ref ServerlessRootRole
+      Source:
+        BuildSpec: >-
+          version: 0.2
+
+          phases:
+            install:
+              commands:
+                - npm install -g serverless
+            build:
+              commands:
+                - sls deploy --stage dev
+            post_build:
+              commands:
+                - ls -al
+          artifacts:
+            files:
+              - '**/*'
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 5
+  DeployTest:
+    Type: 'AWS::CodeBuild::Project'
+    Properties: 
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: 'CodeBuild project for deploying to the test environment'
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/nodejs:6.3.1 #http://docs.aws.amazon.com/codebuild/latest/userguide/build-env-ref.html#build-env-ref-available
+        Type: LINUX_CONTAINER
+      Name: !Join 
+        - ''
+        - - 'deploy-test-'
+          - !Ref ApplicationName
+      ServiceRole: !Ref ServerlessRootRole
+      Source:
+        BuildSpec: >-
+          version: 0.2
+
+          phases:
+            install:
+              commands:
+                - npm install -g serverless
+                - ls -al
+            build:
+              commands:
+                - sls deploy --stage test
+            post_build:
+              commands:
+                - pwd
+          artifacts:
+            files:
+              - '**/*'
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 5
+  DeployProd:
+    Type: 'AWS::CodeBuild::Project'
+    Properties: 
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: 'CodeBuild project for deploying to the prod environment'
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/nodejs:6.3.1 #http://docs.aws.amazon.com/codebuild/latest/userguide/build-env-ref.html#build-env-ref-available
+        Type: LINUX_CONTAINER
+      Name: !Join 
+        - ''
+        - - 'deploy-prod-'
+          - !Ref ApplicationName
+      ServiceRole: !Ref ServerlessRootRole
+      Source:
+        BuildSpec: >-
+          version: 0.2
+
+          phases:
+            install:
+              commands:
+                - npm install -g serverless
+            build:
+              commands:
+                - sls deploy --stage prod
+            post_build:
+              commands:
+                - pwd
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 5
+  CodePipelineStack:
+    Type: 'AWS::CodePipeline::Pipeline'    
+    Properties:
+      RoleArn: !Join 
+        - ''
+        - - 'arn:aws:iam::'
+          - !Ref 'AWS::AccountId'
+          - ':role/'
+          - !Ref CodePipelineRole
+      ArtifactStore:
+        Type: S3
+        Location: !Ref CodePipelineBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - InputArtifacts: []
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: '1'
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: !Ref ApplicationName
+              Configuration:
+                BranchName: !Ref DevelopmentBranchName
+                RepositoryName: !Ref RepositoryName
+              RunOrder: 1
+        - Name: LintAndTest
+          Actions:
+            - InputArtifacts:
+                - Name: !Ref ApplicationName
+              Name: LintAndTest
+              ActionTypeId:
+                Category: Test
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              OutputArtifacts: []
+              Configuration:
+                ProjectName: !Ref LintAndTest
+              RunOrder: 1
+        - Name: DeployDev
+          Actions:
+            - InputArtifacts:
+                - Name: !Ref ApplicationName
+              Name: DeployDev
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: TestCode
+              Configuration:
+                ProjectName: !Ref DeployDev
+              RunOrder: 1
+        - Name: ApproveForTest
+          Actions:
+            - InputArtifacts: []
+              Name: ApproveForTest
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: '1'
+                Provider: Manual
+              OutputArtifacts: []
+              RunOrder: 1
+        - Name: DeployTest
+          Actions:
+            - InputArtifacts:
+                - Name: TestCode
+              Name: DeployTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: ProdCode
+              Configuration:
+                ProjectName: !Ref DeployTest
+              RunOrder: 1
+        - Name: ApproveForProd
+          Actions:
+            - InputArtifacts: []
+              Name: ApproveForProd
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: '1'
+                Provider: Manual
+              OutputArtifacts: []
+              RunOrder: 1
+        - Name: DeployProd
+          Actions:
+            - InputArtifacts:
+                - Name: ProdCode
+              Name: DeployProd
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              OutputArtifacts: []
+              Configuration:
+                ProjectName: !Ref DeployProd
+              RunOrder: 1
+Outputs:
+  CodePipelineRole:
+    Value: !Ref CodePipelineRole
