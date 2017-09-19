@@ -191,7 +191,7 @@ Resources:
                 commands:
                   - npm run build
                   - cd build
-                  - aws s3 sync . s3://${BucketName}
+                  - aws s3 sync . s3://${BucketName} --delete
             artifacts:
               files:
                 - '**/*'
@@ -226,7 +226,7 @@ Resources:
                 commands:
                   - npm run build
                   - cd build
-                  - aws s3 sync . s3://${BucketName}
+                  - aws s3 sync . s3://${BucketName} --delete
           - { BucketName: !Ref ProdBucket }
         Type: CODEPIPELINE
   CodePipelineStack:
