@@ -192,9 +192,9 @@ Resources:
                   - npm run build
                   - cd build
                   - aws s3 sync . s3://${BucketName}
-              artifacts:
-                files:
-                  - '**/*'
+            artifacts:
+              files:
+                - '**/*'
           - { BucketName: !Ref DevBucket }
         Type: CODEPIPELINE
       TimeoutInMinutes: 5
