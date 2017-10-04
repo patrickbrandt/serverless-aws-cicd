@@ -186,7 +186,7 @@ Resources:
             phases:
               install:
                 commands:
-                  - npm install --production
+                  - npm install
               build:
                 commands:
                   - npm run build
@@ -221,7 +221,7 @@ Resources:
             phases:
               install:
                 commands:
-                  - npm install --production
+                  - npm install
               build:
                 commands:
                   - npm run build
