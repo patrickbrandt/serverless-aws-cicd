@@ -248,6 +248,7 @@ Resources:
             install:
               commands:
                 - npm install -g serverless
+                - npm install --production
             build:
               commands:
                 - sls deploy --stage dev
@@ -282,7 +283,7 @@ Resources:
             install:
               commands:
                 - npm install -g serverless
-                - ls -al
+                - npm install --production
             build:
               commands:
                 - sls deploy --stage test
@@ -317,6 +318,7 @@ Resources:
             install:
               commands:
                 - npm install -g serverless
+                - npm install --production
             build:
               commands:
                 - sls deploy --stage prod
